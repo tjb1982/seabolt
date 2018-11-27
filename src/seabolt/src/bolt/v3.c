@@ -882,13 +882,24 @@ void BoltProtocolV3_extract_metadata(struct BoltConnection* connection, struct B
                 struct BoltValue* value = BoltDictionary_value(metadata, i);
                 switch (BoltValue_type(value)) {
                 case BOLT_STRING: {
-                    char new_connection_id[MAX_CONNECTION_ID_SIZE];
-                    strncpy(new_connection_id, BoltString_get(value), (size_t) value->size+1);
-                    const char* old_connection_id = BoltConnection_id(connection);
-                    snprintf(state->connection_id, MAX_CONNECTION_ID_SIZE, "%s, %s", old_connection_id,
-                            new_connection_id);
-                    BoltLog_info(connection->log, "[%s]: <SET connection_id=\"%s\">", old_connection_id,
-                            new_connection_id);
+                    char old_connection_id[MAX_CONNECTION_ID_SIZE];
+                    const char *new_connection_id = BoltString_get(value);
+                    strncpy(old_connection_id, BoltConnection_id(connection), MAX_CONNECTION_ID_SIZE - 1);
+
+                    if (snprintf(state->connection_id, MAX_CONNECTION_ID_SIZE, "%s, %s",
+                                 old_connection_id, new_connection_id) >= MAX_CONNECTION_ID_SIZE) {
+
+                        strcpy(state->connection_id, old_connection_id);
+
+                        BoltLog_error(connection->log,
+                                      "[%s]: Unable to set new connection_id %s: "
+                                      "new value would exceed max length (%zu)", old_connection_id,
+                                      new_connection_id, MAX_CONNECTION_ID_SIZE);
+                        break;
+                    }
+
+                    BoltLog_info(connection->log, "[%s]: <SET connection_id=\"%s\">",
+                                 old_connection_id, new_connection_id);
                     break;
                 }
                 default:

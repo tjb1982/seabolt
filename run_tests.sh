@@ -61,7 +61,45 @@ function stop_server
     trap - EXIT
 }
 
+function check_server
+{
+    ATTEMPTS=10
+
+    sleep ${CHECK_SERVER_SLEEP}
+
+    echo "-- Checking server"
+    for ((x = 1; x <= ATTEMPTS; x++)); do
+        echo "-- Attempt #${x}"
+        BOLT_PASSWORD="${PASSWORD}" ${BASE}/build/bin/seabolt-cli debug -a \
+                "UNWIND range(1, 10000) AS n RETURN n"
+        if [ "$?" -ne "0" ]
+        then
+            if [ $x -lt $ATTEMPTS ]
+            then
+                echo "-- Attempts remaining: $((ATTEMPTS-x))"
+                sleep 1
+                continue
+            fi
+            echo "FATAL: Server checks failed."
+            exit ${SERVER_INCORRECTLY_CONFIGURED}
+        else
+            break
+        fi
+    done
+}
+
 function run_tests
+{
+    echo "-- Running tests"
+    BOLT_PORT="${BOLT_PORT}" ${BASE}/build/bin/seabolt-test ${TEST_ARGS}
+    if [ "$?" -ne "0" ]
+    then
+        echo "FATAL: Test execution failed."
+        exit ${TESTS_FAILED}
+    fi
+}
+
+function run_boltkit_tests
 {
     NEO4J_VERSION=$1
 
@@ -129,29 +167,21 @@ function run_tests
     trap "stop_server ${NEO4J_DIR}" EXIT
     echo "-- Server is listening at ${NEO4J_BOLT_URI}"
 
-    echo "-- Checking server"
-    BOLT_PASSWORD="${PASSWORD}" BOLT_PORT="${BOLT_PORT}" ${BASE}/build/bin/seabolt-cli debug -a "UNWIND range(1, 10000) AS n RETURN n"
-    if [ "$?" -ne "0" ]
-    then
-        echo "FATAL: Server checks failed."
-        exit ${SERVER_INCORRECTLY_CONFIGURED}
-    fi
-
-    echo "-- Running tests"
-    BOLT_PORT="${BOLT_PORT}" ${BASE}/build/bin/seabolt-test ${TEST_ARGS}
-    if [ "$?" -ne "0" ]
-    then
-        echo "FATAL: Test execution failed."
-        exit ${TESTS_FAILED}
-    fi
-
+    check_server
+    run_tests
     stop_server "${NEO4J_DIR}"
-
 }
 
 echo "Seabolt test run started at $(date +$DATE_FORMAT)"
-check_boltkit
-run_tests "${NEO4J_VERSION}"
+if [ "x${HAVE_SERVER}" != "x" ]
+then
+    check_server
+    run_tests
+else
+    check_boltkit
+    run_boltkit_tests "${NEO4J_VERSION}"
+fi
+
 if [ "$?" -ne "0" ]
 then
     echo "FATAL: Test execution failed."
